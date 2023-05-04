@@ -9,17 +9,17 @@ on:
 jobs:
   tagged-release:
     name: "Tagged Release"
-    runs-on: ubuntu-latest
-    container:
-      image: debian:buster
+    runs-on: ubuntu-20.04
     permissions:
       contents: write
 
     steps:
       - name: Install third party dependencies
-        run: apt update && apt install -y build-essential libssl-dev zlib1g-dev libsqlite3-dev libz-dev curl gem ruby unzip p7zip-full unrar-free git
+        run: sudo apt update && sudo apt install -y build-essential libssl-dev zlib1g-dev libsqlite3-dev libz-dev curl gem ruby unzip p7zip-full unrar-free git
 
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
 
       - name: Git Clone LDB
         uses: actions/checkout@v3
@@ -29,7 +29,7 @@ jobs:
           fetch-depth: 0
         
       - name: Build & Install ldb
-        run: cd ldb && git checkout $(git describe --tags $(git rev-list --tags --max-count=1)) && make && make install
+        run: cd ldb && git checkout $(git describe --tags $(git rev-list --tags --max-count=1)) && make && sudo make install
 
       - name: Build minr
         run: |
@@ -41,60 +41,26 @@ jobs:
           echo "Produced artifact at ${PWD}/artifacts/minr"
 
       - name: 'Tar files'
-        run: tar czvf minr-${{ github.ref_name }}-amd64.tar.gz ./artifacts/*
+        run: tar czvf minr-${{ github.ref_name }}-linux-amd64.tar.gz -C ./artifacts/ .
 
-      - name: 'Prepare deb package files'
-        run: |
-          mkdir -p ./dist/.debpkg/usr/local/bin
-          cp minr ./dist/.debpkg/usr/local/bin/
-          mkdir -p ./dist/.debpkg/DEBIAN
-
-          echo "Package: minr" > ./dist/.debpkg/DEBIAN/control
-          echo "Version: ${{ github.ref_name }}" > ./dist/.debpkg/DEBIAN/control
-          echo "Maintainer: SCANOSS <support@scanoss.com>" > ./dist/.debpkg/DEBIAN/control
-          echo "Architecture: amd64" > ./dist/.debpkg/DEBIAN/control
-          echo "Description: SCANOSS minr" > ./dist/.debpkg/DEBIAN/control
-
-      - uses: jiro4989/build-deb-action@v2
+      - name: Prepare deb package
         id: build_deb
-        with:
-          package: minr
-          package_root: ./dist/.debpkg
-          maintainer: SCANOSS <support@scanoss.com>
-          version: ${{ github.ref }} # refs/tags/v*.*.*
-          arch: amd64
-          depends: 'openssl, zlib'
-          desc: 'SCANOSS minr'
-
-      - name: Fix deb package naming
         run: |
-          file=`echo ${{ steps.build_deb.outputs.file_name }}`
-          fileDest=`echo $file | sed 's/_/-/g'`
-          mv $file $fileDest
+          make prepare_deb_package
+          echo "debpkg_file_name=$(ls *.deb)" >> $GITHUB_OUTPUT
 
-      - name: 'Prepare rpm package files'
+      - name: Prepare rpm package
         run: |
-          mkdir -p ./dist/.rpmpkg/usr/bin
-          cp minr ./dist/.rpmpkg/usr/bin/minr
-          chmod +x ./dist/.rpmpkg/usr/bin/minr
-
-      - uses: jiro4989/build-rpm-action@v2
-        with:
-          summary: 'SCANOSS Minr'
-          package: minr
-          package_root: ./dist/.rpmpkg
-          maintainer: SCANOSS
-          version: ${{ github.ref }} # refs/tags/v*.*.*
-          arch: x86_64
-          desc: 'SCANOSS minr'
+          make prepare_rpm_package
+          echo "rpmpkg_file_name=$(ls dist/rpm/RPMS/x86_64/*.rpm)" >> $GITHUB_OUTPUT
 
       - name: Show the artifacts
         # Items placed in /artifacts in the container will be in
         # ${PWD}/artifacts on the host.
         run: |
           ls -al "${PWD}/artifacts"
-          ls -al "${PWD}/dist"
           ls -al "${PWD}"
+          ls -al "${PWD}/dist/rpm/RPMS/x86_64/"
       
       - name: Create Draft Release ${{ github.ref_type }} - ${{ github.ref_name }}
         if: github.ref_type == 'tag'
@@ -104,7 +70,7 @@ jobs:
           files: |
             ./**.tar.gz
             ./*.deb
-            ./minr-${{ github.ref_name }}-1.el7.x86_64.rpm
+            ./dist/rpm/RPMS/x86_64/*.rpm
 
 
 
